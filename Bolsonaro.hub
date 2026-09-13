@@ -1,9 +1,10 @@
--- [[ ⚽ BOLSONARO HUB V8.3 - FINAL ]] --
--- Follow Fix + Reach Agressivo + Bugs corrigidos
+-- [[ ⚽ BOLSONARO HUB V8.4 - FISICA PRESERVADA ]] --
+-- Sem SetNetworkOwner (não altera física)
+-- Reach com cooldown (não spamma touch)
 
 print("═══════════════════════════════════════════")
-print("  🇧🇷  BOLSONARO HUB  •  v8.3 FINAL")
-print("  Follow Fix + Reach Agressivo")
+print("  🇧🇷  BOLSONARO HUB  •  v8.4")
+print("  Física Preservada")
 print("═══════════════════════════════════════════")
 
 local Players          = game:GetService("Players")
@@ -27,19 +28,18 @@ local Config = {
     Brightness = { Enabled = false, Value = 1.8 },
     FollowBall = {
         Enabled = false,
-        StopDistance = 2.2,
+        StopDistance = 2.5,
         PauseOnInput = true,
         PauseDuration = 1.5,
     },
     Reach = {
         Enabled = false,
         Range = 12,
-        UseSnap = true,
         AutoTouch = true,
+        TouchCooldown = 0.15,   -- 🔑 cooldown entre touch (evita spam)
         ShowCircle = false,
         CircleColor = Color3.fromRGB(255, 215, 0),
         CircleTransp = 0.85,
-        Cooldown = 0.08,
     },
     AutoSprint = { Enabled = false, TriggerDist = 15 },
 }
@@ -60,7 +60,7 @@ local circlePart = nil
 local mainFrame, restoreBtn = nil, nil
 local savedPos = UDim2.new(0.5, -310, 0.5, -200)
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-local lastSnapTime = 0
+local lastTouchTime = 0
 
 local BALL_NAMES = { "TPS", "ESA", "MRS", "PRS", "MPS" }
 local cachedBalls = {}
@@ -269,7 +269,8 @@ local function updateFollowBall()
         hrp.CFrame = CFrame.lookAt(hrp.Position, targetPos)
     end)
 
-    local speed = math.max(hum.WalkSpeed, 16)
+    -- 🔑 velocidade de perseguição limitada (não voa)
+    local speed = math.min(math.max(hum.WalkSpeed, 16), 35)
     followBodyVel.Velocity = direction * speed
 end
 
@@ -281,8 +282,11 @@ local function getLeg()
         or char:FindFirstChild("HumanoidRootPart")
 end
 
+-- 🔑 REACH SEM ALTERAR FÍSICA
+-- Só usa firetouchinterest (com cooldown) — não toca CFrame nem velocidade
 local function applyReach()
     if not Config.Reach.Enabled then return end
+    if not Config.Reach.AutoTouch then return end
 
     local char = getSafeCharacter(); if not char then return end
     local leg = getLeg(); if not leg then return end
@@ -291,34 +295,20 @@ local function applyReach()
     local distance = (leg.Position - ball.Position).Magnitude
     local maxReach = Config.Reach.Range
 
-    if distance > maxReach or distance < 1.5 then return end
+    -- Só age se a bola tá FORA do toque natural (>2.0 studs)
+    -- Se tá perto, o jogo já detecta sozinho — não precisa forçar
+    if distance > maxReach or distance < 2.0 then return end
 
-    if Config.Reach.AutoTouch then
-        pcall(function()
-            firetouchinterest(ball, leg, 0)
-            firetouchinterest(ball, leg, 1)
-        end)
-    end
+    -- 🔑 COOLDOWN: só dispara touch a cada X segundos
+    local now = tick()
+    if now - lastTouchTime < Config.Reach.TouchCooldown then return end
+    lastTouchTime = now
 
-    if Config.Reach.UseSnap then
-        local now = tick()
-        if now - lastSnapTime >= Config.Reach.Cooldown then
-            lastSnapTime = now
-            pcall(function()
-                if ball:GetNetworkOwner() ~= LocalPlayer then
-                    ball:SetNetworkOwner(LocalPlayer)
-                end
-            end)
-            pcall(function()
-                if sethiddenproperty then
-                    sethiddenproperty(ball, "NetworkIsServerBounded", false)
-                end
-            end)
-            pcall(function()
-                ball.CFrame = leg.CFrame * CFrame.new(0, -1, -1)
-            end)
-        end
-    end
+    -- 🔑 SÓ ISSO: força o evento de toque. Nada de CFrame/velocidade/owner
+    pcall(function()
+        firetouchinterest(ball, leg, 0)
+        firetouchinterest(ball, leg, 1)
+    end)
 end
 
 local function updateReachCircle()
@@ -456,7 +446,7 @@ local function createUI()
     local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,6); bc.Parent = badge
     local vl = Instance.new("TextLabel")
     vl.Size = UDim2.new(1,0,1,0); vl.BackgroundTransparency = 1
-    vl.Text = "v8.3"; vl.TextSize = 11
+    vl.Text = "v8.4"; vl.TextSize = 11
     vl.Font = Enum.Font.GothamBold; vl.TextColor3 = Color3.fromRGB(220,220,220); vl.Parent = badge
 
     local function makeWinBtn(text, xPos, onClick)
@@ -468,9 +458,9 @@ local function createUI()
         if onClick then b.MouseButton1Click:Connect(onClick) end
         return b
     end
-    makeWinBtn("−", -80, function() savedPos = Main.Position; Main.Visible = false; restoreBtn.Visible = true end)
-    makeWinBtn("⛶", -52, function() end)
-    makeWinBtn("×", -26, function() Main.Visible = false; restoreBtn.Visible = false end)
+    makeWinBtn("-", -80, function() savedPos = Main.Position; Main.Visible = false; restoreBtn.Visible = true end)
+    makeWinBtn("=", -52, function() end)
+    makeWinBtn("X", -26, function() Main.Visible = false; restoreBtn.Visible = false end)
     restoreBtn.MouseButton1Click:Connect(function() Main.Visible = true; Main.Position = savedPos; restoreBtn.Visible = false end)
 
     local sidebar = Instance.new("Frame")
@@ -514,12 +504,12 @@ local function createUI()
         end
     end
 
-    addNav("Player", "👤", "Player", 1)
-    addNav("Ball", "⚽", "Ball", 2)
-    addNav("Reach", "🎯", "Reach", 3)
-    addNav("Visual", "👁", "Visual", 4)
-    addNav("Protect", "🛡", "Protect", 5)
-    addNav("Others", "📋", "Others", 6)
+    addNav("Player", "P", "Player", 1)
+    addNav("Ball", "B", "Ball", 2)
+    addNav("Reach", "R", "Reach", 3)
+    addNav("Visual", "V", "Visual", 4)
+    addNav("Protect", "S", "Protect", 5)
+    addNav("Others", "O", "Others", 6)
     for n, btn in pairs(navButtons) do
         btn.MouseButton1Click:Connect(function() setPage(n) end)
     end
@@ -656,21 +646,20 @@ local function createUI()
     makeToggle(pB, 3, "Piscar ESP", "Efeito pulsante", Config.ESP, "Pulse")
     makeToggle(pB, 4, "Mostrar Caixa", "SelectionBox", Config.ESP, "ShowBox")
     makeToggle(pB, 5, "Mostrar Texto", "Billboard", Config.ESP, "ShowTag")
-    makeLabel(pB, 6, "- AUTO FOLLOW (BodyVelocity)")
-    makeToggle(pB, 7, "Auto Follow", "Segue a bola (tecnica Matheus)", Config.FollowBall, "Enabled")
+    makeLabel(pB, 6, "- AUTO FOLLOW")
+    makeToggle(pB, 7, "Auto Follow", "Segue a bola", Config.FollowBall, "Enabled")
     makeToggle(pB, 8, "Pausar em Input", "Pausa ao WASD", Config.FollowBall, "PauseOnInput")
     makeSlider(pB, 9, "Distancia Stop", "1-10 studs", Config.FollowBall, "StopDistance", 1, 10, 0.5)
 
     local pR = newPage("Reach")
-    makeLabel(pR, 1, "- REACH AGRESSIVO")
+    makeLabel(pR, 1, "- REACH (SEM ALTERAR FISICA)")
     makeToggle(pR, 2, "Reach", "Ativa o reach", Config.Reach, "Enabled")
     makeToggle(pR, 3, "Auto Touch", "firetouchinterest", Config.Reach, "AutoTouch")
-    makeToggle(pR, 4, "Magnet Snap", "Puxa a bola (agressivo)", Config.Reach, "UseSnap")
-    makeToggle(pR, 5, "Mostrar Circle", "Circulo visual do alcance", Config.Reach, "ShowCircle")
-    makeSlider(pR, 6, "Alcance", "1-30 studs", Config.Reach, "Range", 1, 30, 1)
-    makeSlider(pR, 7, "Cooldown Snap", "0.02-0.5s", Config.Reach, "Cooldown", 0.02, 0.5, 0.01)
-    makeLabel(pR, 8, "Modo Agressivo = mais visivel")
-    makeLabel(pR, 9, "Use em conta alt")
+    makeToggle(pR, 4, "Mostrar Circle", "Circulo visual", Config.Reach, "ShowCircle")
+    makeSlider(pR, 5, "Alcance", "1-30 studs", Config.Reach, "Range", 1, 30, 1)
+    makeSlider(pR, 6, "Cooldown Touch", "0.05-0.5s", Config.Reach, "TouchCooldown", 0.05, 0.5, 0.01)
+    makeLabel(pR, 7, "Fisica da bola 100% preservada")
+    makeLabel(pR, 8, "A bola sofre so o toque natural")
 
     local pV = newPage("Visual")
     makeLabel(pV, 1, "- ILUMINACAO")
@@ -780,8 +769,8 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
 end))
 
 print("═══════════════════════════════════════════")
-print("  BOLSONARO HUB v8.3 CARREGADO")
+print("  BOLSONARO HUB v8.4 CARREGADO")
 print("  RSHIFT=menu | G=reach | R=follow | T=esp")
 print("  Modo:", isMobile and "MOBILE" or "PC")
-print("  Digite _G.BOLSONARO_destroyAll() pra limpar")
+print("  Fisica da bola preservada 100%")
 print("═══════════════════════════════════════════")
