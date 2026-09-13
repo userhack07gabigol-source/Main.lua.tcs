@@ -1,10 +1,12 @@
--- [[ ⚽ BOLSONARO HUB V8.4 - FISICA PRESERVADA ]] --
--- Sem SetNetworkOwner (não altera física)
--- Reach com cooldown (não spamma touch)
+-- [[ ⚽ BOLSONARO HUB V8.5 - FINAL ]] --
+-- Feito por: zacklobao
+-- Fix definitivo: WalkSpeed enforcement (mobile/pc)
+-- Física da bola 100% preservada
 
 print("═══════════════════════════════════════════")
-print("  🇧🇷  BOLSONARO HUB  •  v8.4")
-print("  Física Preservada")
+print("  🇧🇷  BOLSONARO HUB  •  v8.5 FINAL")
+print("  By: zacklobao")
+print("  WalkSpeed Fix + Reach + Follow")
 print("═══════════════════════════════════════════")
 
 local Players          = game:GetService("Players")
@@ -14,36 +16,50 @@ local Lighting         = game:GetService("Lighting")
 local Workspace        = game:GetService("Workspace")
 local LocalPlayer      = Players.LocalPlayer
 
+-- ═══════════════════════════════════════════════
+--  FORWARD DECLARATIONS
+-- ═══════════════════════════════════════════════
 local applySpeed, applyJump, applyFOV, applyBrightness
-local cleanupESP
+local cleanupESP, enforceWalkSpeed
 local refreshUIRefs = {}
 
+-- ═══════════════════════════════════════════════
+--  CONFIG
+-- ═══════════════════════════════════════════════
 local Config = {
     Debug = false,
+    Credits = "zacklobao",
+
     Bypass = { Enabled = true, SpoofWalkSpeed = true, SpoofJumpPower = true },
     Humanization = { Enabled = true, SpeedVariation = 0.05 },
     ESP = { Enabled = false, Color = Color3.fromRGB(255,220,0), Pulse = true, ShowBox = true, ShowTag = true },
-    Speed = { Enabled = false, WalkSpeed = 28, JumpPower = 55, BaseSpeed = 16, BaseJump = 50 },
+    Speed = { Enabled = false, WalkSpeed = 30, JumpPower = 55, BaseSpeed = 16, BaseJump = 50 },
     FOV = { Value = 70, Base = 70 },
     Brightness = { Enabled = false, Value = 1.8 },
+
     FollowBall = {
         Enabled = false,
         StopDistance = 2.5,
         PauseOnInput = true,
         PauseDuration = 1.5,
     },
+
     Reach = {
         Enabled = false,
         Range = 12,
         AutoTouch = true,
-        TouchCooldown = 0.15,   -- 🔑 cooldown entre touch (evita spam)
+        TouchCooldown = 0.15,
         ShowCircle = false,
         CircleColor = Color3.fromRGB(255, 215, 0),
         CircleTransp = 0.85,
     },
+
     AutoSprint = { Enabled = false, TriggerDist = 15 },
 }
 
+-- ═══════════════════════════════════════════════
+--  ESTADO
+-- ═══════════════════════════════════════════════
 local Connections = {}
 local UI_Elements = {}
 local originalLighting = {
@@ -67,6 +83,9 @@ local cachedBalls = {}
 local lastBallScan = 0
 local cachedClosest = nil
 
+-- ═══════════════════════════════════════════════
+--  HELPERS
+-- ═══════════════════════════════════════════════
 local function safeCall(f, ...)
     if not f then return end
     local ok, err = pcall(f, ...)
@@ -120,6 +139,9 @@ local function getClosestBall()
     return best
 end
 
+-- ═══════════════════════════════════════════════
+--  ESP
+-- ═══════════════════════════════════════════════
 cleanupESP = function()
     if espHighlight then espHighlight:Destroy(); espHighlight = nil end
     if espSelection then espSelection:Destroy(); espSelection = nil end
@@ -163,6 +185,9 @@ local function updateESP()
     end
 end
 
+-- ═══════════════════════════════════════════════
+--  SPEED / JUMP / FOV / BRILHO
+-- ═══════════════════════════════════════════════
 local function getHumanSpeed()
     if not Config.Humanization.Enabled then return Config.Speed.WalkSpeed end
     local base = Config.Speed.WalkSpeed
@@ -181,6 +206,25 @@ applySpeed = function()
         hum.WalkSpeed = Config.Speed.BaseSpeed
         hum.UseJumpPower = true
         hum.JumpPower = Config.Speed.BaseJump
+    end
+end
+
+-- 🔑 FIX: força WalkSpeed todo frame (TCS reseta no mobile)
+enforceWalkSpeed = function()
+    local char = getSafeCharacter(); if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+
+    local targetSpeed = Config.Speed.Enabled and Config.Speed.WalkSpeed or Config.Speed.BaseSpeed
+
+    -- 🔑 Só força se diferir do alvo (evita spam de property changes)
+    if math.abs(hum.WalkSpeed - targetSpeed) > 0.1 then
+        hum.WalkSpeed = targetSpeed
+    end
+
+    -- Força também o JumpPower
+    local targetJump = Config.Speed.Enabled and Config.Speed.JumpPower or Config.Speed.BaseJump
+    if hum.UseJumpPower and math.abs(hum.JumpPower - targetJump) > 0.1 then
+        hum.JumpPower = targetJump
     end
 end
 
@@ -209,6 +253,9 @@ applyBrightness = function()
     end
 end
 
+-- ═══════════════════════════════════════════════
+--  AUTO FOLLOW
+-- ═══════════════════════════════════════════════
 local function destroyFollowVel()
     if followBodyVel then
         pcall(function() followBodyVel:Destroy() end)
@@ -269,11 +316,13 @@ local function updateFollowBall()
         hrp.CFrame = CFrame.lookAt(hrp.Position, targetPos)
     end)
 
-    -- 🔑 velocidade de perseguição limitada (não voa)
     local speed = math.min(math.max(hum.WalkSpeed, 16), 35)
     followBodyVel.Velocity = direction * speed
 end
 
+-- ═══════════════════════════════════════════════
+--  REACH (sem alterar física da bola)
+-- ═══════════════════════════════════════════════
 local function getLeg()
     local char = getSafeCharacter(); if not char then return nil end
     return char:FindFirstChild("Right Leg")
@@ -282,8 +331,6 @@ local function getLeg()
         or char:FindFirstChild("HumanoidRootPart")
 end
 
--- 🔑 REACH SEM ALTERAR FÍSICA
--- Só usa firetouchinterest (com cooldown) — não toca CFrame nem velocidade
 local function applyReach()
     if not Config.Reach.Enabled then return end
     if not Config.Reach.AutoTouch then return end
@@ -295,16 +342,12 @@ local function applyReach()
     local distance = (leg.Position - ball.Position).Magnitude
     local maxReach = Config.Reach.Range
 
-    -- Só age se a bola tá FORA do toque natural (>2.0 studs)
-    -- Se tá perto, o jogo já detecta sozinho — não precisa forçar
     if distance > maxReach or distance < 2.0 then return end
 
-    -- 🔑 COOLDOWN: só dispara touch a cada X segundos
     local now = tick()
     if now - lastTouchTime < Config.Reach.TouchCooldown then return end
     lastTouchTime = now
 
-    -- 🔑 SÓ ISSO: força o evento de toque. Nada de CFrame/velocidade/owner
     pcall(function()
         firetouchinterest(ball, leg, 0)
         firetouchinterest(ball, leg, 1)
@@ -335,6 +378,9 @@ local function updateReachCircle()
     circlePart.CFrame = CFrame.new(hrp.Position)
 end
 
+-- ═══════════════════════════════════════════════
+--  AUTO-SPRINT
+-- ═══════════════════════════════════════════════
 local function updateAutoSprint()
     if not Config.AutoSprint.Enabled then
         if sprintActive then sprintActive = false end
@@ -352,6 +398,9 @@ local function updateAutoSprint()
     end
 end
 
+-- ═══════════════════════════════════════════════
+--  BYPASS
+-- ═══════════════════════════════════════════════
 local function initBypass()
     if not Config.Bypass.Enabled or bypassActive then return end
     bypassActive = true
@@ -378,6 +427,9 @@ local function initBypass()
     end
 end
 
+-- ═══════════════════════════════════════════════
+--  UI
+-- ═══════════════════════════════════════════════
 local function createUI()
     local parentGui
     local ok = pcall(function() parentGui = game:GetService("CoreGui") end)
@@ -388,6 +440,39 @@ local function createUI()
     ScreenGui.IgnoreGuiInset = true; ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.Parent = parentGui
     table.insert(UI_Elements, ScreenGui)
+
+    -- Banner de créditos (fica 5 segundos no canto)
+    local creditsFrame = Instance.new("Frame")
+    creditsFrame.Size = UDim2.new(0, 200, 0, 50)
+    creditsFrame.Position = UDim2.new(0.5, -100, 0, 20)
+    creditsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    creditsFrame.BackgroundTransparency = 0.2
+    creditsFrame.BorderSizePixel = 0
+    creditsFrame.Parent = ScreenGui
+    local crCorner = Instance.new("UICorner"); crCorner.CornerRadius = UDim.new(0, 10); crCorner.Parent = creditsFrame
+    local crStroke = Instance.new("UIStroke"); crStroke.Color = Color3.fromRGB(75,145,230); crStroke.Thickness = 1.5; crStroke.Parent = creditsFrame
+
+    local crLabel = Instance.new("TextLabel")
+    crLabel.Size = UDim2.new(1, 0, 1, 0)
+    crLabel.BackgroundTransparency = 1
+    crLabel.Text = "🇧🇷 BOLSONARO HUB\nBy: " .. Config.Credits
+    crLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    crLabel.TextSize = 13
+    crLabel.Font = Enum.Font.GothamBold
+    crLabel.TextScaled = false
+    crLabel.RichText = true
+    crLabel.Parent = creditsFrame
+
+    -- Fade out após 5s
+    task.spawn(function()
+        task.wait(5)
+        for i = 1, 20 do
+            creditsFrame.BackgroundTransparency = 0.2 + (i * 0.04)
+            crLabel.TextTransparency = i * 0.05
+            task.wait(0.05)
+        end
+        creditsFrame:Destroy()
+    end)
 
     restoreBtn = Instance.new("TextButton")
     restoreBtn.Size = UDim2.new(0, 55, 0, 55); restoreBtn.Position = UDim2.new(0, 20, 0, 100)
@@ -416,14 +501,14 @@ local function createUI()
     end
 
     local Main = Instance.new("Frame")
-    Main.Size = UDim2.new(0, 620, 0, 400); Main.Position = savedPos
+    Main.Size = UDim2.new(0, 620, 0, 420); Main.Position = savedPos
     Main.BackgroundColor3 = Color3.fromRGB(12,12,14); Main.BorderSizePixel = 0
     Main.Active = true; Main.Parent = ScreenGui; mainFrame = Main
     local mc = Instance.new("UICorner"); mc.CornerRadius = UDim.new(0,14); mc.Parent = Main
     local ms = Instance.new("UIStroke"); ms.Color = Color3.fromRGB(60,60,70); ms.Thickness = 1; ms.Transparency = 0.3; ms.Parent = Main
 
     local header = Instance.new("Frame")
-    header.Size = UDim2.new(1,0,0,42); header.BackgroundColor3 = Color3.fromRGB(20,20,25)
+    header.Size = UDim2.new(1,0,0,46); header.BackgroundColor3 = Color3.fromRGB(20,20,25)
     header.BorderSizePixel = 0; header.Parent = Main
     local hc = Instance.new("UICorner"); hc.CornerRadius = UDim.new(0,14); hc.Parent = header
     local hm = Instance.new("Frame")
@@ -434,24 +519,33 @@ local function createUI()
     ll.Size = UDim2.new(0,26,1,0); ll.Position = UDim2.new(0,12,0,0)
     ll.BackgroundTransparency = 1; ll.Text = "👑"; ll.TextSize = 18
     ll.Font = Enum.Font.GothamBold; ll.TextColor3 = Color3.fromRGB(255,255,255); ll.Parent = header
+
     local nl = Instance.new("TextLabel")
-    nl.Size = UDim2.new(0,200,1,0); nl.Position = UDim2.new(0,38,0,0)
+    nl.Size = UDim2.new(0,200,0,22); nl.Position = UDim2.new(0,38,0,3)
     nl.BackgroundTransparency = 1; nl.Text = "Bolsonaro.gg"
-    nl.TextSize = 14; nl.Font = Enum.Font.GothamBold
+    nl.TextSize = 15; nl.Font = Enum.Font.GothamBold
     nl.TextColor3 = Color3.fromRGB(255,255,255); nl.TextXAlignment = Enum.TextXAlignment.Left; nl.Parent = header
+
+    local authorLbl = Instance.new("TextLabel")
+    authorLbl.Size = UDim2.new(0,200,0,14); authorLbl.Position = UDim2.new(0,38,0,24)
+    authorLbl.BackgroundTransparency = 1; authorLbl.Text = "By: " .. Config.Credits
+    authorLbl.TextSize = 11; authorLbl.Font = Enum.Font.Gotham
+    authorLbl.TextColor3 = Color3.fromRGB(120, 200, 140); authorLbl.TextXAlignment = Enum.TextXAlignment.Left
+    authorLbl.Parent = header
+
     local badge = Instance.new("Frame")
-    badge.Size = UDim2.new(0,60,0,22); badge.Position = UDim2.new(0,180,0,10)
+    badge.Size = UDim2.new(0,60,0,22); badge.Position = UDim2.new(0,180,0,12)
     badge.BackgroundColor3 = Color3.fromRGB(40,40,45); badge.BackgroundTransparency = 0.3
     badge.BorderSizePixel = 0; badge.Parent = header
     local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,6); bc.Parent = badge
     local vl = Instance.new("TextLabel")
     vl.Size = UDim2.new(1,0,1,0); vl.BackgroundTransparency = 1
-    vl.Text = "v8.4"; vl.TextSize = 11
+    vl.Text = "v8.5"; vl.TextSize = 11
     vl.Font = Enum.Font.GothamBold; vl.TextColor3 = Color3.fromRGB(220,220,220); vl.Parent = badge
 
     local function makeWinBtn(text, xPos, onClick)
         local b = Instance.new("TextButton")
-        b.Size = UDim2.new(0,24,0,24); b.Position = UDim2.new(1,xPos,0,10)
+        b.Size = UDim2.new(0,24,0,24); b.Position = UDim2.new(1,xPos,0,11)
         b.BackgroundTransparency = 1; b.Text = text; b.TextSize = 16
         b.Font = Enum.Font.GothamBold; b.TextColor3 = Color3.fromRGB(200,200,200)
         b.Parent = header
@@ -464,12 +558,12 @@ local function createUI()
     restoreBtn.MouseButton1Click:Connect(function() Main.Visible = true; Main.Position = savedPos; restoreBtn.Visible = false end)
 
     local sidebar = Instance.new("Frame")
-    sidebar.Size = UDim2.new(0,140,1,-54); sidebar.Position = UDim2.new(0,8,0,46)
+    sidebar.Size = UDim2.new(0,140,1,-58); sidebar.Position = UDim2.new(0,8,0,50)
     sidebar.BackgroundTransparency = 1; sidebar.BorderSizePixel = 0; sidebar.Parent = Main
     local sl = Instance.new("UIListLayout")
     sl.Padding = UDim.new(0,4); sl.SortOrder = Enum.SortOrder.LayoutOrder; sl.Parent = sidebar
     local content = Instance.new("Frame")
-    content.Size = UDim2.new(1,-160,1,-54); content.Position = UDim2.new(0,152,0,46)
+    content.Size = UDim2.new(1,-160,1,-58); content.Position = UDim2.new(0,152,0,50)
     content.BackgroundTransparency = 1; content.BorderSizePixel = 0; content.Parent = Main
 
     local pages, navButtons = {}, {}
@@ -504,12 +598,12 @@ local function createUI()
         end
     end
 
-    addNav("Player", "P", "Player", 1)
-    addNav("Ball", "B", "Ball", 2)
-    addNav("Reach", "R", "Reach", 3)
-    addNav("Visual", "V", "Visual", 4)
-    addNav("Protect", "S", "Protect", 5)
-    addNav("Others", "O", "Others", 6)
+    addNav("Player", "👤", "Player", 1)
+    addNav("Ball", "⚽", "Ball", 2)
+    addNav("Reach", "🎯", "Reach", 3)
+    addNav("Visual", "👁", "Visual", 4)
+    addNav("Protect", "🛡", "Protect", 5)
+    addNav("Others", "📋", "Others", 6)
     for n, btn in pairs(navButtons) do
         btn.MouseButton1Click:Connect(function() setPage(n) end)
     end
@@ -632,6 +726,7 @@ local function createUI()
         l.TextXAlignment = Enum.TextXAlignment.Left; l.LayoutOrder = order; l.Parent = parent
     end
 
+    -- PLAYER
     local pP = newPage("Player")
     makeLabel(pP, 1, "- MOVIMENTO")
     makeToggle(pP, 2, "Speed Boost", "WalkSpeed + JumpPower", Config.Speed, "Enabled", applySpeed)
@@ -640,6 +735,7 @@ local function createUI()
     makeLabel(pP, 5, "- CAMERA")
     makeSlider(pP, 6, "FOV Changer", "40-120", Config.FOV, "Value", 40, 120, 1, applyFOV)
 
+    -- BALL
     local pB = newPage("Ball")
     makeLabel(pB, 1, "- ESP")
     makeToggle(pB, 2, "ESP da Bola", "Highlight + caixa + texto", Config.ESP, "Enabled")
@@ -651,34 +747,41 @@ local function createUI()
     makeToggle(pB, 8, "Pausar em Input", "Pausa ao WASD", Config.FollowBall, "PauseOnInput")
     makeSlider(pB, 9, "Distancia Stop", "1-10 studs", Config.FollowBall, "StopDistance", 1, 10, 0.5)
 
+    -- REACH
     local pR = newPage("Reach")
-    makeLabel(pR, 1, "- REACH (SEM ALTERAR FISICA)")
+    makeLabel(pR, 1, "- REACH (FÍSICA PRESERVADA)")
     makeToggle(pR, 2, "Reach", "Ativa o reach", Config.Reach, "Enabled")
     makeToggle(pR, 3, "Auto Touch", "firetouchinterest", Config.Reach, "AutoTouch")
-    makeToggle(pR, 4, "Mostrar Circle", "Circulo visual", Config.Reach, "ShowCircle")
+    makeToggle(pR, 4, "Mostrar Circle", "Círculo visual", Config.Reach, "ShowCircle")
     makeSlider(pR, 5, "Alcance", "1-30 studs", Config.Reach, "Range", 1, 30, 1)
     makeSlider(pR, 6, "Cooldown Touch", "0.05-0.5s", Config.Reach, "TouchCooldown", 0.05, 0.5, 0.01)
-    makeLabel(pR, 7, "Fisica da bola 100% preservada")
-    makeLabel(pR, 8, "A bola sofre so o toque natural")
+    makeLabel(pR, 7, "Física da bola 100% preservada")
+    makeLabel(pR, 8, "A bola sofre só o toque natural")
 
+    -- VISUAL
     local pV = newPage("Visual")
-    makeLabel(pV, 1, "- ILUMINACAO")
+    makeLabel(pV, 1, "- ILUMINAÇÃO")
     makeToggle(pV, 2, "Luminosidade", "Brilho customizado", Config.Brightness, "Enabled", applyBrightness)
     makeSlider(pV, 3, "Brilho", "0-4", Config.Brightness, "Value", 0, 4, 0.1, applyBrightness)
     makeLabel(pV, 4, "- AUTO-SPRINT")
     makeToggle(pV, 5, "Auto Sprint", "Sprint quando longe", Config.AutoSprint, "Enabled")
     makeSlider(pV, 6, "Dist. Sprint", "5-40", Config.AutoSprint, "TriggerDist", 5, 40, 1)
 
+    -- PROTECT
     local pPr = newPage("Protect")
     makeLabel(pPr, 1, "- BYPASS")
     makeToggle(pPr, 2, "Bypass (Spoof)", "Engana WalkSpeed", Config.Bypass, "Enabled", function(state)
         if state then pcall(initBypass) end
     end)
-    makeToggle(pPr, 3, "Humanizacao", "Variacao natural", Config.Humanization, "Enabled")
+    makeToggle(pPr, 3, "Humanização", "Variação natural", Config.Humanization, "Enabled")
 
+    -- OTHERS
     local pO = newPage("Others")
     makeLabel(pO, 1, "- SISTEMA")
     makeToggle(pO, 2, "Debug (Console)", "Logs no console (F9)", Config, "Debug")
+    makeLabel(pO, 3, "- CRÉDITOS")
+    makeLabel(pO, 4, "Script feito por: " .. Config.Credits)
+    makeLabel(pO, 5, "Versão: 8.5 FINAL")
 
     setPage("Reach")
 
@@ -723,8 +826,12 @@ local function createUI()
 
     _G.BOLSONARO = _G.BOLSONARO or {}
     _G.BOLSONARO.showUI = function() if mainFrame then mainFrame.Visible = true; if restoreBtn then restoreBtn.Visible = false end end end
+    _G.BOLSONARO.credits = Config.Credits
 end
 
+-- ═══════════════════════════════════════════════
+--  LIMPEZA
+-- ═══════════════════════════════════════════════
 local function destroyAll()
     if destroyed then return end
     destroyed = true
@@ -745,6 +852,9 @@ local function destroyAll()
 end
 _G.BOLSONARO_destroyAll = destroyAll
 
+-- ═══════════════════════════════════════════════
+--  INIT
+-- ═══════════════════════════════════════════════
 pcall(createUI)
 pcall(initBypass)
 
@@ -757,6 +867,7 @@ end))
 
 table.insert(Connections, RunService.Heartbeat:Connect(function()
     pcall(updateAutoSprint)
+    pcall(enforceWalkSpeed)  -- 🔑 FIX: força WalkSpeed todo frame
 end))
 
 table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
@@ -769,8 +880,9 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
 end))
 
 print("═══════════════════════════════════════════")
-print("  BOLSONARO HUB v8.4 CARREGADO")
+print("  BOLSONARO HUB v8.5 CARREGADO")
+print("  By: " .. Config.Credits)
 print("  RSHIFT=menu | G=reach | R=follow | T=esp")
 print("  Modo:", isMobile and "MOBILE" or "PC")
-print("  Fisica da bola preservada 100%")
+print("  Física da bola 100% preservada")
 print("═══════════════════════════════════════════")
