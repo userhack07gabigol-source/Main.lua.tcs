@@ -1,6 +1,5 @@
 -- [[ ⚽ BOLSONARO HUB V8.3 - FINAL ]] --
--- Follow Fix + Reach Agressivo (Matheus) + Bugs corrigidos
--- Pronto pra publicar
+-- Follow Fix + Reach Agressivo + Bugs corrigidos
 
 print("═══════════════════════════════════════════")
 print("  🇧🇷  BOLSONARO HUB  •  v8.3 FINAL")
@@ -14,16 +13,10 @@ local Lighting         = game:GetService("Lighting")
 local Workspace        = game:GetService("Workspace")
 local LocalPlayer      = Players.LocalPlayer
 
--- ═══════════════════════════════════════════════
---  FORWARD DECLARATIONS
--- ═══════════════════════════════════════════════
 local applySpeed, applyJump, applyFOV, applyBrightness
 local cleanupESP
 local refreshUIRefs = {}
 
--- ═══════════════════════════════════════════════
---  CONFIG
--- ═══════════════════════════════════════════════
 local Config = {
     Debug = false,
     Bypass = { Enabled = true, SpoofWalkSpeed = true, SpoofJumpPower = true },
@@ -32,14 +25,12 @@ local Config = {
     Speed = { Enabled = false, WalkSpeed = 28, JumpPower = 55, BaseSpeed = 16, BaseJump = 50 },
     FOV = { Value = 70, Base = 70 },
     Brightness = { Enabled = false, Value = 1.8 },
-
     FollowBall = {
         Enabled = false,
         StopDistance = 2.2,
         PauseOnInput = true,
         PauseDuration = 1.5,
     },
-
     Reach = {
         Enabled = false,
         Range = 12,
@@ -50,13 +41,9 @@ local Config = {
         CircleTransp = 0.85,
         Cooldown = 0.08,
     },
-
     AutoSprint = { Enabled = false, TriggerDist = 15 },
 }
 
--- ═══════════════════════════════════════════════
---  ESTADO
--- ═══════════════════════════════════════════════
 local Connections = {}
 local UI_Elements = {}
 local originalLighting = {
@@ -79,11 +66,7 @@ local BALL_NAMES = { "TPS", "ESA", "MRS", "PRS", "MPS" }
 local cachedBalls = {}
 local lastBallScan = 0
 local cachedClosest = nil
-local lastClosestUpdate = 0
 
--- ═══════════════════════════════════════════════
---  HELPERS
--- ═══════════════════════════════════════════════
 local function safeCall(f, ...)
     if not f then return end
     local ok, err = pcall(f, ...)
@@ -107,7 +90,6 @@ local function isBallName(name)
     return false
 end
 
--- 🐛 FIX 1: throttle reduzido de 2s → 0.3s + valida cache
 local function refreshBalls(force)
     local now = tick()
     if not force and now - lastBallScan < 0.3 then return end
@@ -122,12 +104,9 @@ end
 
 local function getClosestBall()
     refreshBalls(false)
-
-    -- 🐛 FIX 1b: se cache tem a bola e ela ainda é válida, retorna direto
     if cachedClosest and cachedClosest.Parent and not cachedClosest.Anchored then
         return cachedClosest
     end
-
     local char = getSafeCharacter(); if not char then return nil end
     local myPos = char.HumanoidRootPart.Position
     local best, bestDist = nil, math.huge
@@ -141,9 +120,6 @@ local function getClosestBall()
     return best
 end
 
--- ═══════════════════════════════════════════════
---  ESP
--- ═══════════════════════════════════════════════
 cleanupESP = function()
     if espHighlight then espHighlight:Destroy(); espHighlight = nil end
     if espSelection then espSelection:Destroy(); espSelection = nil end
@@ -187,9 +163,6 @@ local function updateESP()
     end
 end
 
--- ═══════════════════════════════════════════════
---  SPEED / JUMP / FOV / BRILHO
--- ═══════════════════════════════════════════════
 local function getHumanSpeed()
     if not Config.Humanization.Enabled then return Config.Speed.WalkSpeed end
     local base = Config.Speed.WalkSpeed
@@ -236,9 +209,6 @@ applyBrightness = function()
     end
 end
 
--- ═══════════════════════════════════════════════
---  🧲 AUTO FOLLOW — BodyVelocity (Matheus)
--- ═══════════════════════════════════════════════
 local function destroyFollowVel()
     if followBodyVel then
         pcall(function() followBodyVel:Destroy() end)
@@ -303,11 +273,6 @@ local function updateFollowBall()
     followBodyVel.Velocity = direction * speed
 end
 
--- ═══════════════════════════════════════════════
---  🎯 REACH AGRESSIVO (Matheus)
---  FIX 2: SetNetworkOwner antes do sethiddenproperty
---  FIX 3: sethiddenproperty dentro do cooldown
--- ═══════════════════════════════════════════════
 local function getLeg()
     local char = getSafeCharacter(); if not char then return nil end
     return char:FindFirstChild("Right Leg")
@@ -326,10 +291,8 @@ local function applyReach()
     local distance = (leg.Position - ball.Position).Magnitude
     local maxReach = Config.Reach.Range
 
-    -- Fora do range ou colado → não faz nada
     if distance > maxReach or distance < 1.5 then return end
 
-    -- 🔑 PASSO 1: firetouchinterest (sempre ativo)
     if Config.Reach.AutoTouch then
         pcall(function()
             firetouchinterest(ball, leg, 0)
@@ -337,27 +300,20 @@ local function applyReach()
         end)
     end
 
-    -- 🔑 PASSO 2 e 3: tudo dentro do cooldown (evita spam/detecção)
     if Config.Reach.UseSnap then
         local now = tick()
         if now - lastSnapTime >= Config.Reach.Cooldown then
             lastSnapTime = now
-
-            -- 🐛 FIX 2: SetNetworkOwner PRIMEIRO (transfere dono)
             pcall(function()
                 if ball:GetNetworkOwner() ~= LocalPlayer then
                     ball:SetNetworkOwner(LocalPlayer)
                 end
             end)
-
-            -- 🐛 FIX 3: sethiddenproperty DENTRO do cooldown
             pcall(function()
                 if sethiddenproperty then
                     sethiddenproperty(ball, "NetworkIsServerBounded", false)
                 end
             end)
-
-            -- Snap: puxa a bola pra perto do pé
             pcall(function()
                 ball.CFrame = leg.CFrame * CFrame.new(0, -1, -1)
             end)
@@ -365,9 +321,6 @@ local function applyReach()
     end
 end
 
--- ═══════════════════════════════════════════════
---  CIRCLE VISUAL DO REACH
--- ═══════════════════════════════════════════════
 local function updateReachCircle()
     if not Config.Reach.ShowCircle then
         if circlePart then circlePart:Destroy(); circlePart = nil end
@@ -392,9 +345,6 @@ local function updateReachCircle()
     circlePart.CFrame = CFrame.new(hrp.Position)
 end
 
--- ═══════════════════════════════════════════════
---  AUTO-SPRINT
--- ═══════════════════════════════════════════════
 local function updateAutoSprint()
     if not Config.AutoSprint.Enabled then
         if sprintActive then sprintActive = false end
@@ -412,9 +362,6 @@ local function updateAutoSprint()
     end
 end
 
--- ═══════════════════════════════════════════════
---  BYPASS
--- ═══════════════════════════════════════════════
 local function initBypass()
     if not Config.Bypass.Enabled or bypassActive then return end
     bypassActive = true
@@ -441,9 +388,6 @@ local function initBypass()
     end
 end
 
--- ═══════════════════════════════════════════════
---  UI
--- ═══════════════════════════════════════════════
 local function createUI()
     local parentGui
     local ok = pcall(function() parentGui = game:GetService("CoreGui") end)
@@ -699,52 +643,52 @@ local function createUI()
     end
 
     local pP = newPage("Player")
-    makeLabel(pP, 1, "― MOVIMENTO")
+    makeLabel(pP, 1, "- MOVIMENTO")
     makeToggle(pP, 2, "Speed Boost", "WalkSpeed + JumpPower", Config.Speed, "Enabled", applySpeed)
     makeSlider(pP, 3, "Speed", "16-100", Config.Speed, "WalkSpeed", 16, 100, 1, applySpeed)
     makeSlider(pP, 4, "Jump Power", "50-200", Config.Speed, "JumpPower", 50, 200, 5, applyJump)
-    makeLabel(pP, 5, "― CÂMERA")
+    makeLabel(pP, 5, "- CAMERA")
     makeSlider(pP, 6, "FOV Changer", "40-120", Config.FOV, "Value", 40, 120, 1, applyFOV)
 
     local pB = newPage("Ball")
-    makeLabel(pB, 1, "― ESP")
+    makeLabel(pB, 1, "- ESP")
     makeToggle(pB, 2, "ESP da Bola", "Highlight + caixa + texto", Config.ESP, "Enabled")
     makeToggle(pB, 3, "Piscar ESP", "Efeito pulsante", Config.ESP, "Pulse")
     makeToggle(pB, 4, "Mostrar Caixa", "SelectionBox", Config.ESP, "ShowBox")
     makeToggle(pB, 5, "Mostrar Texto", "Billboard", Config.ESP, "ShowTag")
-    makeLabel(pB, 6, "― AUTO FOLLOW (BodyVelocity)")
-    makeToggle(pB, 7, "Auto Follow", "Segue a bola (técnica Matheus)", Config.FollowBall, "Enabled")
+    makeLabel(pB, 6, "- AUTO FOLLOW (BodyVelocity)")
+    makeToggle(pB, 7, "Auto Follow", "Segue a bola (tecnica Matheus)", Config.FollowBall, "Enabled")
     makeToggle(pB, 8, "Pausar em Input", "Pausa ao WASD", Config.FollowBall, "PauseOnInput")
-    makeSlider(pB, 9, "Distância Stop", "1-10 studs", Config.FollowBall, "StopDistance", 1, 10, 0.5)
+    makeSlider(pB, 9, "Distancia Stop", "1-10 studs", Config.FollowBall, "StopDistance", 1, 10, 0.5)
 
     local pR = newPage("Reach")
-    makeLabel(pR, 1, "― 🎯 REACH AGRESSIVO")
+    makeLabel(pR, 1, "- REACH AGRESSIVO")
     makeToggle(pR, 2, "Reach", "Ativa o reach", Config.Reach, "Enabled")
     makeToggle(pR, 3, "Auto Touch", "firetouchinterest", Config.Reach, "AutoTouch")
-    makeToggle(pR, 4, "Magnet Snap", "🔑 Puxa a bola (agressivo)", Config.Reach, "UseSnap")
-    makeToggle(pR, 5, "Mostrar Circle", "Círculo visual do alcance", Config.Reach, "ShowCircle")
+    makeToggle(pR, 4, "Magnet Snap", "Puxa a bola (agressivo)", Config.Reach, "UseSnap")
+    makeToggle(pR, 5, "Mostrar Circle", "Circulo visual do alcance", Config.Reach, "ShowCircle")
     makeSlider(pR, 6, "Alcance", "1-30 studs", Config.Reach, "Range", 1, 30, 1)
     makeSlider(pR, 7, "Cooldown Snap", "0.02-0.5s", Config.Reach, "Cooldown", 0.02, 0.5, 0.01)
-    makeLabel(pR, 8, "⚠️ Modo Agressivo = mais visível")
+    makeLabel(pR, 8, "Modo Agressivo = mais visivel")
     makeLabel(pR, 9, "Use em conta alt")
 
     local pV = newPage("Visual")
-    makeLabel(pV, 1, "― ILUMINAÇÃO")
+    makeLabel(pV, 1, "- ILUMINACAO")
     makeToggle(pV, 2, "Luminosidade", "Brilho customizado", Config.Brightness, "Enabled", applyBrightness)
     makeSlider(pV, 3, "Brilho", "0-4", Config.Brightness, "Value", 0, 4, 0.1, applyBrightness)
-    makeLabel(pV, 4, "― AUTO-SPRINT")
+    makeLabel(pV, 4, "- AUTO-SPRINT")
     makeToggle(pV, 5, "Auto Sprint", "Sprint quando longe", Config.AutoSprint, "Enabled")
     makeSlider(pV, 6, "Dist. Sprint", "5-40", Config.AutoSprint, "TriggerDist", 5, 40, 1)
 
     local pPr = newPage("Protect")
-    makeLabel(pPr, 1, "― BYPASS")
+    makeLabel(pPr, 1, "- BYPASS")
     makeToggle(pPr, 2, "Bypass (Spoof)", "Engana WalkSpeed", Config.Bypass, "Enabled", function(state)
         if state then pcall(initBypass) end
     end)
-    makeToggle(pPr, 3, "Humanização", "Variação natural", Config.Humanization, "Enabled")
+    makeToggle(pPr, 3, "Humanizacao", "Variacao natural", Config.Humanization, "Enabled")
 
     local pO = newPage("Others")
-    makeLabel(pO, 1, "― SISTEMA")
+    makeLabel(pO, 1, "- SISTEMA")
     makeToggle(pO, 2, "Debug (Console)", "Logs no console (F9)", Config, "Debug")
 
     setPage("Reach")
@@ -792,9 +736,6 @@ local function createUI()
     _G.BOLSONARO.showUI = function() if mainFrame then mainFrame.Visible = true; if restoreBtn then restoreBtn.Visible = false end end end
 end
 
--- ═══════════════════════════════════════════════
---  LIMPEZA (agora utilizada no botão FECHAR MENU real)
--- ═══════════════════════════════════════════════
 local function destroyAll()
     if destroyed then return end
     destroyed = true
@@ -815,9 +756,6 @@ local function destroyAll()
 end
 _G.BOLSONARO_destroyAll = destroyAll
 
--- ═══════════════════════════════════════════════
---  INIT
--- ═══════════════════════════════════════════════
 pcall(createUI)
 pcall(initBypass)
 
@@ -842,7 +780,7 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
 end))
 
 print("═══════════════════════════════════════════")
-print("  🇧🇷  BOLSONARO HUB v8.3 CARREGADO")
+print("  BOLSONARO HUB v8.3 CARREGADO")
 print("  RSHIFT=menu | G=reach | R=follow | T=esp")
 print("  Modo:", isMobile and "MOBILE" or "PC")
 print("  Digite _G.BOLSONARO_destroyAll() pra limpar")
