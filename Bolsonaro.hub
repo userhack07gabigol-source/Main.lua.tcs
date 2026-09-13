@@ -1,12 +1,11 @@
--- [[ ⚽ BOLSONARO HUB V8.5 - FINAL ]] --
+-- [[ ⚽ BOLSONARO HUB V8.7 - FINAL ]] --
 -- Feito por: zacklobao
--- Fix definitivo: WalkSpeed enforcement (mobile/pc)
--- Física da bola 100% preservada
+-- WalkSpeed direto pela barra (sem toggle)
 
 print("═══════════════════════════════════════════")
-print("  🇧🇷  BOLSONARO HUB  •  v8.5 FINAL")
+print("  🇧🇷  BOLSONARO HUB  •  v8.7")
 print("  By: zacklobao")
-print("  WalkSpeed Fix + Reach + Follow")
+print("  WalkSpeed direto + Reach + Follow")
 print("═══════════════════════════════════════════")
 
 local Players          = game:GetService("Players")
@@ -16,24 +15,25 @@ local Lighting         = game:GetService("Lighting")
 local Workspace        = game:GetService("Workspace")
 local LocalPlayer      = Players.LocalPlayer
 
--- ═══════════════════════════════════════════════
---  FORWARD DECLARATIONS
--- ═══════════════════════════════════════════════
 local applySpeed, applyJump, applyFOV, applyBrightness
-local cleanupESP, enforceWalkSpeed
+local cleanupESP, enforceWalkSpeed, captureOriginalStats
 local refreshUIRefs = {}
 
--- ═══════════════════════════════════════════════
---  CONFIG
--- ═══════════════════════════════════════════════
 local Config = {
     Debug = false,
     Credits = "zacklobao",
-
-    Bypass = { Enabled = true, SpoofWalkSpeed = true, SpoofJumpPower = true },
-    Humanization = { Enabled = true, SpeedVariation = 0.05 },
+    Bypass = { Enabled = true, SpoofWalkSpeed = false, SpoofJumpPower = false },
+    Humanization = { Enabled = false, SpeedVariation = 0.05 },
     ESP = { Enabled = false, Color = Color3.fromRGB(255,220,0), Pulse = true, ShowBox = true, ShowTag = true },
-    Speed = { Enabled = false, WalkSpeed = 30, JumpPower = 55, BaseSpeed = 16, BaseJump = 50 },
+
+    -- 🔑 NOVO SISTEMA: barra direta, sem toggle
+    Speed = {
+        Value = 16,          -- velocidade atual
+        JumpPower = 50,      -- pulo atual
+        BaseSpeed = 16,      -- capturado automaticamente
+        BaseJump = 50,
+    },
+
     FOV = { Value = 70, Base = 70 },
     Brightness = { Enabled = false, Value = 1.8 },
 
@@ -53,13 +53,8 @@ local Config = {
         CircleColor = Color3.fromRGB(255, 215, 0),
         CircleTransp = 0.85,
     },
-
-    AutoSprint = { Enabled = false, TriggerDist = 15 },
 }
 
--- ═══════════════════════════════════════════════
---  ESTADO
--- ═══════════════════════════════════════════════
 local Connections = {}
 local UI_Elements = {}
 local originalLighting = {
@@ -69,23 +64,21 @@ local originalLighting = {
 local destroyed = false
 local espHighlight, espSelection, espBillboard, espBall = nil, nil, nil, nil
 local bypassActive = false
-local sprintActive = false
 local followBodyVel = nil
 local manualPauseUntil = 0
 local circlePart = nil
 local mainFrame, restoreBtn = nil, nil
-local savedPos = UDim2.new(0.5, -310, 0.5, -200)
+local savedPos = UDim2.new(0.5, -310, 0.5, -220)
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 local lastTouchTime = 0
+local savedBaseWalkSpeed = nil
+local savedBaseJumpPower = nil
 
 local BALL_NAMES = { "TPS", "ESA", "MRS", "PRS", "MPS" }
 local cachedBalls = {}
 local lastBallScan = 0
 local cachedClosest = nil
 
--- ═══════════════════════════════════════════════
---  HELPERS
--- ═══════════════════════════════════════════════
 local function safeCall(f, ...)
     if not f then return end
     local ok, err = pcall(f, ...)
@@ -139,9 +132,24 @@ local function getClosestBall()
     return best
 end
 
--- ═══════════════════════════════════════════════
---  ESP
--- ═══════════════════════════════════════════════
+-- 🔑 Captura WalkSpeed REAL do personagem (uma vez)
+captureOriginalStats = function()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+
+    if savedBaseWalkSpeed == nil then
+        savedBaseWalkSpeed = hum.WalkSpeed
+        savedBaseJumpPower = hum.JumpPower
+        Config.Speed.BaseSpeed = savedBaseWalkSpeed
+        Config.Speed.BaseJump = savedBaseJumpPower
+        if Config.Debug then
+            print("[BOLSONARO] WalkSpeed base capturado:", savedBaseWalkSpeed)
+        end
+    end
+end
+
 cleanupESP = function()
     if espHighlight then espHighlight:Destroy(); espHighlight = nil end
     if espSelection then espSelection:Destroy(); espSelection = nil end
@@ -185,46 +193,37 @@ local function updateESP()
     end
 end
 
--- ═══════════════════════════════════════════════
---  SPEED / JUMP / FOV / BRILHO
--- ═══════════════════════════════════════════════
-local function getHumanSpeed()
-    if not Config.Humanization.Enabled then return Config.Speed.WalkSpeed end
-    local base = Config.Speed.WalkSpeed
-    local v = base * Config.Humanization.SpeedVariation
-    return base + (math.random() * v * 2) - v
-end
-
+-- 🔑 WalkSpeed direto (sem toggle)
 applySpeed = function()
     local char = getSafeCharacter(); if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
-    if Config.Speed.Enabled then
-        hum.WalkSpeed = getHumanSpeed()
-        hum.UseJumpPower = true
-        hum.JumpPower = Config.Speed.JumpPower
-    else
-        hum.WalkSpeed = Config.Speed.BaseSpeed
-        hum.UseJumpPower = true
-        hum.JumpPower = Config.Speed.BaseJump
-    end
+
+    captureOriginalStats()
+
+    hum.WalkSpeed = Config.Speed.Value
+    hum.UseJumpPower = true
+    hum.JumpPower = Config.Speed.JumpPower
 end
 
--- 🔑 FIX: força WalkSpeed todo frame (TCS reseta no mobile)
+-- 🔑 Força o WalkSpeed direto (nunca desliga)
 enforceWalkSpeed = function()
     local char = getSafeCharacter(); if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
 
-    local targetSpeed = Config.Speed.Enabled and Config.Speed.WalkSpeed or Config.Speed.BaseSpeed
-
-    -- 🔑 Só força se diferir do alvo (evita spam de property changes)
-    if math.abs(hum.WalkSpeed - targetSpeed) > 0.1 then
-        hum.WalkSpeed = targetSpeed
+    -- Não força se estiver caído/ragdoll (respeita stun do jogo)
+    local state = hum:GetState()
+    if state == Enum.HumanoidStateType.FallingDown
+       or state == Enum.HumanoidStateType.Ragdoll
+       or state == Enum.HumanoidStateType.PlatformStanding then
+        return
     end
 
-    -- Força também o JumpPower
-    local targetJump = Config.Speed.Enabled and Config.Speed.JumpPower or Config.Speed.BaseJump
-    if hum.UseJumpPower and math.abs(hum.JumpPower - targetJump) > 0.1 then
-        hum.JumpPower = targetJump
+    if math.abs(hum.WalkSpeed - Config.Speed.Value) > 0.1 then
+        hum.WalkSpeed = Config.Speed.Value
+    end
+
+    if hum.UseJumpPower and math.abs(hum.JumpPower - Config.Speed.JumpPower) > 0.1 then
+        hum.JumpPower = Config.Speed.JumpPower
     end
 end
 
@@ -232,7 +231,7 @@ applyJump = function()
     local char = getSafeCharacter(); if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
     hum.UseJumpPower = true
-    hum.JumpPower = Config.Speed.Enabled and Config.Speed.JumpPower or Config.Speed.BaseJump
+    hum.JumpPower = Config.Speed.JumpPower
 end
 
 applyFOV = function()
@@ -253,9 +252,6 @@ applyBrightness = function()
     end
 end
 
--- ═══════════════════════════════════════════════
---  AUTO FOLLOW
--- ═══════════════════════════════════════════════
 local function destroyFollowVel()
     if followBodyVel then
         pcall(function() followBodyVel:Destroy() end)
@@ -320,9 +316,6 @@ local function updateFollowBall()
     followBodyVel.Velocity = direction * speed
 end
 
--- ═══════════════════════════════════════════════
---  REACH (sem alterar física da bola)
--- ═══════════════════════════════════════════════
 local function getLeg()
     local char = getSafeCharacter(); if not char then return nil end
     return char:FindFirstChild("Right Leg")
@@ -378,58 +371,12 @@ local function updateReachCircle()
     circlePart.CFrame = CFrame.new(hrp.Position)
 end
 
--- ═══════════════════════════════════════════════
---  AUTO-SPRINT
--- ═══════════════════════════════════════════════
-local function updateAutoSprint()
-    if not Config.AutoSprint.Enabled then
-        if sprintActive then sprintActive = false end
-        return
-    end
-    local char = getSafeCharacter(); if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
-    local ball = getClosestBall(); if not ball then return end
-    local dist = (char.HumanoidRootPart.Position - ball.Position).Magnitude
-    local should = dist > Config.AutoSprint.TriggerDist and hum.MoveDirection.Magnitude > 0.1
-    if should and not sprintActive then
-        sprintActive = true; hum.WalkSpeed = Config.Speed.WalkSpeed * 1.5
-    elseif not should and sprintActive then
-        sprintActive = false; hum.WalkSpeed = getHumanSpeed()
-    end
-end
-
--- ═══════════════════════════════════════════════
---  BYPASS
--- ═══════════════════════════════════════════════
 local function initBypass()
     if not Config.Bypass.Enabled or bypassActive then return end
     bypassActive = true
-    if Config.Bypass.SpoofWalkSpeed then
-        pcall(function()
-            local mt = getrawmetatable(game)
-            local oldIndex = mt.__index
-            setreadonly(mt, false)
-            mt.__index = newcclosure(function(self, key)
-                if not checkcaller() and typeof(self) == "Instance"
-                    and self:IsA("Humanoid") and LocalPlayer.Character
-                    and self:IsDescendantOf(LocalPlayer.Character) then
-                    if key == "WalkSpeed" and Config.Speed.Enabled and not sprintActive then
-                        return Config.Speed.BaseSpeed
-                    end
-                    if key == "JumpPower" and Config.Bypass.SpoofJumpPower and Config.Speed.Enabled then
-                        return Config.Speed.BaseJump
-                    end
-                end
-                return oldIndex(self, key)
-            end)
-            setreadonly(mt, true)
-        end)
-    end
+    -- Bypass removido por padrão (não precisamos esconder WalkSpeed agora)
 end
 
--- ═══════════════════════════════════════════════
---  UI
--- ═══════════════════════════════════════════════
 local function createUI()
     local parentGui
     local ok = pcall(function() parentGui = game:GetService("CoreGui") end)
@@ -441,12 +388,12 @@ local function createUI()
     ScreenGui.Parent = parentGui
     table.insert(UI_Elements, ScreenGui)
 
-    -- Banner de créditos (fica 5 segundos no canto)
+    -- Banner de créditos
     local creditsFrame = Instance.new("Frame")
-    creditsFrame.Size = UDim2.new(0, 200, 0, 50)
-    creditsFrame.Position = UDim2.new(0.5, -100, 0, 20)
+    creditsFrame.Size = UDim2.new(0, 220, 0, 55)
+    creditsFrame.Position = UDim2.new(0.5, -110, 0, 20)
     creditsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    creditsFrame.BackgroundTransparency = 0.2
+    creditsFrame.BackgroundTransparency = 0.15
     creditsFrame.BorderSizePixel = 0
     creditsFrame.Parent = ScreenGui
     local crCorner = Instance.new("UICorner"); crCorner.CornerRadius = UDim.new(0, 10); crCorner.Parent = creditsFrame
@@ -455,19 +402,16 @@ local function createUI()
     local crLabel = Instance.new("TextLabel")
     crLabel.Size = UDim2.new(1, 0, 1, 0)
     crLabel.BackgroundTransparency = 1
-    crLabel.Text = "🇧🇷 BOLSONARO HUB\nBy: " .. Config.Credits
+    crLabel.Text = "BOLSONARO HUB\nBy: " .. Config.Credits
     crLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    crLabel.TextSize = 13
+    crLabel.TextSize = 14
     crLabel.Font = Enum.Font.GothamBold
-    crLabel.TextScaled = false
-    crLabel.RichText = true
     crLabel.Parent = creditsFrame
 
-    -- Fade out após 5s
     task.spawn(function()
         task.wait(5)
         for i = 1, 20 do
-            creditsFrame.BackgroundTransparency = 0.2 + (i * 0.04)
+            creditsFrame.BackgroundTransparency = 0.15 + (i * 0.0425)
             crLabel.TextTransparency = i * 0.05
             task.wait(0.05)
         end
@@ -540,7 +484,7 @@ local function createUI()
     local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,6); bc.Parent = badge
     local vl = Instance.new("TextLabel")
     vl.Size = UDim2.new(1,0,1,0); vl.BackgroundTransparency = 1
-    vl.Text = "v8.5"; vl.TextSize = 11
+    vl.Text = "v8.7"; vl.TextSize = 11
     vl.Font = Enum.Font.GothamBold; vl.TextColor3 = Color3.fromRGB(220,220,220); vl.Parent = badge
 
     local function makeWinBtn(text, xPos, onClick)
@@ -726,14 +670,44 @@ local function createUI()
         l.TextXAlignment = Enum.TextXAlignment.Left; l.LayoutOrder = order; l.Parent = parent
     end
 
+    local function makeButton(parent, order, text, callback, color)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1,-10,0,36); btn.BackgroundColor3 = color or Color3.fromRGB(75,145,230)
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.Font = Enum.Font.GothamBold; btn.TextSize = 13
+        btn.Text = text; btn.LayoutOrder = order; btn.Parent = parent
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,6); c.Parent = btn
+        btn.MouseButton1Click:Connect(function()
+            if callback then safeCall(callback) end
+        end)
+        return btn
+    end
+
     -- PLAYER
     local pP = newPage("Player")
-    makeLabel(pP, 1, "- MOVIMENTO")
-    makeToggle(pP, 2, "Speed Boost", "WalkSpeed + JumpPower", Config.Speed, "Enabled", applySpeed)
-    makeSlider(pP, 3, "Speed", "16-100", Config.Speed, "WalkSpeed", 16, 100, 1, applySpeed)
-    makeSlider(pP, 4, "Jump Power", "50-200", Config.Speed, "JumpPower", 50, 200, 5, applyJump)
-    makeLabel(pP, 5, "- CAMERA")
-    makeSlider(pP, 6, "FOV Changer", "40-120", Config.FOV, "Value", 40, 120, 1, applyFOV)
+    makeLabel(pP, 1, "- VELOCIDADE (direto, sem toggle)")
+    makeSlider(pP, 2, "WalkSpeed", "8 = lento / 16 = normal / 50 = rápido", Config.Speed, "Value", 8, 100, 1, applySpeed)
+    makeSlider(pP, 3, "Jump Power", "50-200", Config.Speed, "JumpPower", 50, 200, 5, applyJump)
+    makeLabel(pP, 4, "- RESET RÁPIDO")
+    makeButton(pP, 5, "🔄 Voltar pra 16", function()
+        Config.Speed.Value = 16
+        Config.Speed.JumpPower = 50
+        for _, r in ipairs(refreshUIRefs) do pcall(r) end
+        applySpeed()
+    end, Color3.fromRGB(200, 100, 50))
+    makeButton(pP, 6, "🏃 Modo Turbo (50)", function()
+        Config.Speed.Value = 50
+        for _, r in ipairs(refreshUIRefs) do pcall(r) end
+        applySpeed()
+    end, Color3.fromRGB(80, 150, 60))
+    makeButton(pP, 7, "🐌 Modo Lento (10)", function()
+        Config.Speed.Value = 10
+        for _, r in ipairs(refreshUIRefs) do pcall(r) end
+        applySpeed()
+    end, Color3.fromRGB(100, 100, 130))
+
+    makeLabel(pP, 8, "- CÂMERA")
+    makeSlider(pP, 9, "FOV Changer", "40-120", Config.FOV, "Value", 40, 120, 1, applyFOV)
 
     -- BALL
     local pB = newPage("Ball")
@@ -756,24 +730,17 @@ local function createUI()
     makeSlider(pR, 5, "Alcance", "1-30 studs", Config.Reach, "Range", 1, 30, 1)
     makeSlider(pR, 6, "Cooldown Touch", "0.05-0.5s", Config.Reach, "TouchCooldown", 0.05, 0.5, 0.01)
     makeLabel(pR, 7, "Física da bola 100% preservada")
-    makeLabel(pR, 8, "A bola sofre só o toque natural")
 
     -- VISUAL
     local pV = newPage("Visual")
     makeLabel(pV, 1, "- ILUMINAÇÃO")
     makeToggle(pV, 2, "Luminosidade", "Brilho customizado", Config.Brightness, "Enabled", applyBrightness)
     makeSlider(pV, 3, "Brilho", "0-4", Config.Brightness, "Value", 0, 4, 0.1, applyBrightness)
-    makeLabel(pV, 4, "- AUTO-SPRINT")
-    makeToggle(pV, 5, "Auto Sprint", "Sprint quando longe", Config.AutoSprint, "Enabled")
-    makeSlider(pV, 6, "Dist. Sprint", "5-40", Config.AutoSprint, "TriggerDist", 5, 40, 1)
 
     -- PROTECT
     local pPr = newPage("Protect")
     makeLabel(pPr, 1, "- BYPASS")
-    makeToggle(pPr, 2, "Bypass (Spoof)", "Engana WalkSpeed", Config.Bypass, "Enabled", function(state)
-        if state then pcall(initBypass) end
-    end)
-    makeToggle(pPr, 3, "Humanização", "Variação natural", Config.Humanization, "Enabled")
+    makeToggle(pPr, 2, "Bypass (Spoof)", "Opcional (recomendado OFF)", Config.Bypass, "Enabled")
 
     -- OTHERS
     local pO = newPage("Others")
@@ -781,9 +748,11 @@ local function createUI()
     makeToggle(pO, 2, "Debug (Console)", "Logs no console (F9)", Config, "Debug")
     makeLabel(pO, 3, "- CRÉDITOS")
     makeLabel(pO, 4, "Script feito por: " .. Config.Credits)
-    makeLabel(pO, 5, "Versão: 8.5 FINAL")
+    makeLabel(pO, 5, "Versão: 8.7")
+    makeLabel(pO, 6, "WalkSpeed direto pela barra")
+    makeLabel(pO, 7, "Nunca precisa desligar")
 
-    setPage("Reach")
+    setPage("Player")
 
     do
         local drag, ds, sp
@@ -829,9 +798,6 @@ local function createUI()
     _G.BOLSONARO.credits = Config.Credits
 end
 
--- ═══════════════════════════════════════════════
---  LIMPEZA
--- ═══════════════════════════════════════════════
 local function destroyAll()
     if destroyed then return end
     destroyed = true
@@ -841,7 +807,7 @@ local function destroyAll()
     local char = getSafeCharacter()
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed = Config.Speed.BaseSpeed end
+        if hum then hum.WalkSpeed = savedBaseWalkSpeed or Config.Speed.BaseSpeed end
     end
     if workspace.CurrentCamera then workspace.CurrentCamera.FieldOfView = Config.FOV.Base end
     for _, c in ipairs(Connections) do pcall(function() c:Disconnect() end) end
@@ -852,11 +818,20 @@ local function destroyAll()
 end
 _G.BOLSONARO_destroyAll = destroyAll
 
--- ═══════════════════════════════════════════════
---  INIT
--- ═══════════════════════════════════════════════
 pcall(createUI)
 pcall(initBypass)
+
+pcall(captureOriginalStats)
+
+table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    captureOriginalStats()
+    pcall(applySpeed)
+    pcall(applyFOV)
+    destroyFollowVel()
+    cachedClosest = nil
+    cachedBalls = {}
+end))
 
 table.insert(Connections, RunService.RenderStepped:Connect(function()
     pcall(updateESP)
@@ -866,23 +841,13 @@ table.insert(Connections, RunService.RenderStepped:Connect(function()
 end))
 
 table.insert(Connections, RunService.Heartbeat:Connect(function()
-    pcall(updateAutoSprint)
-    pcall(enforceWalkSpeed)  -- 🔑 FIX: força WalkSpeed todo frame
-end))
-
-table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    pcall(applySpeed)
-    pcall(applyFOV)
-    destroyFollowVel()
-    cachedClosest = nil
-    cachedBalls = {}
+    pcall(enforceWalkSpeed)
 end))
 
 print("═══════════════════════════════════════════")
-print("  BOLSONARO HUB v8.5 CARREGADO")
+print("  BOLSONARO HUB v8.7 CARREGADO")
 print("  By: " .. Config.Credits)
 print("  RSHIFT=menu | G=reach | R=follow | T=esp")
 print("  Modo:", isMobile and "MOBILE" or "PC")
-print("  Física da bola 100% preservada")
+print("  WalkSpeed direto (sem toggle)")
 print("═══════════════════════════════════════════")
