@@ -1,11 +1,11 @@
--- [[ ⚽ BOLSONARO HUB V8.7 - FINAL ]] --
+-- [[ ⚽ BOLSONARO HUB V8.8 - WALKSPEED SEGURO ]] --
 -- Feito por: zacklobao
--- WalkSpeed direto pela barra (sem toggle)
+-- WalkSpeed limitado de 16 a 24 (range seguro)
 
 print("═══════════════════════════════════════════")
-print("  🇧🇷  BOLSONARO HUB  •  v8.7")
+print("  🇧🇷  BOLSONARO HUB  •  v8.8")
 print("  By: zacklobao")
-print("  WalkSpeed direto + Reach + Follow")
+print("  WalkSpeed Seguro (16-24)")
 print("═══════════════════════════════════════════")
 
 local Players          = game:GetService("Players")
@@ -13,6 +13,7 @@ local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Lighting         = game:GetService("Lighting")
 local Workspace        = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer      = Players.LocalPlayer
 
 local applySpeed, applyJump, applyFOV, applyBrightness
@@ -22,15 +23,16 @@ local refreshUIRefs = {}
 local Config = {
     Debug = false,
     Credits = "zacklobao",
-    Bypass = { Enabled = true, SpoofWalkSpeed = false, SpoofJumpPower = false },
+    Bypass = { Enabled = true },
     Humanization = { Enabled = false, SpeedVariation = 0.05 },
     ESP = { Enabled = false, Color = Color3.fromRGB(255,220,0), Pulse = true, ShowBox = true, ShowTag = true },
 
-    -- 🔑 NOVO SISTEMA: barra direta, sem toggle
+    -- 🔑 WALKSPEED: limitado de 16 a 24 (range seguro)
     Speed = {
-        Value = 16,          -- velocidade atual
-        JumpPower = 50,      -- pulo atual
-        BaseSpeed = 16,      -- capturado automaticamente
+        Value = 16,
+        JumpPower = 50,
+        MaxSafe = 24,
+        BaseSpeed = 16,
         BaseJump = 50,
     },
 
@@ -79,6 +81,54 @@ local cachedBalls = {}
 local lastBallScan = 0
 local cachedClosest = nil
 
+-- ═══════════════════════════════════════════════
+--  ANTI-CHEAT BYPASS (bloqueia remotes suspeitos)
+-- ═══════════════════════════════════════════════
+local function blockSuspiciousRemotes()
+    local suspeitos = {
+        "report", "validate", "check", "anticheat", "ac_",
+        "flag", "detect", "walkcheck", "speedcheck",
+        "integrity", "security", "monitor",
+    }
+
+    local function isSuspeito(remote)
+        local nome = remote.Name:lower()
+        for _, palavra in ipairs(suspeitos) do
+            if nome:find(palavra, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- Hook no __namecall pra bloquear FireServer de remotes suspeitos
+    pcall(function()
+        local mt = getrawmetatable(game)
+        local oldNamecall = mt.__namecall
+        setreadonly(mt, false)
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "FireServer" and typeof(self) == "Instance"
+               and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction"))
+               and isSuspeito(self) then
+                return
+            end
+            return oldNamecall(self, ...)
+        end)
+        setreadonly(mt, true)
+    end)
+
+    -- Também remove remotes existentes suspeitos
+    for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+        if (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) and isSuspeito(obj) then
+            pcall(function() obj:Destroy() end)
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════════
+--  HELPERS
+-- ═══════════════════════════════════════════════
 local function safeCall(f, ...)
     if not f then return end
     local ok, err = pcall(f, ...)
@@ -132,7 +182,7 @@ local function getClosestBall()
     return best
 end
 
--- 🔑 Captura WalkSpeed REAL do personagem (uma vez)
+-- 🔑 Captura WalkSpeed base
 captureOriginalStats = function()
     local char = LocalPlayer.Character
     if not char then return end
@@ -193,24 +243,33 @@ local function updateESP()
     end
 end
 
--- 🔑 WalkSpeed direto (sem toggle)
+-- 🔑 Aplica WalkSpeed (respeitando limite 16-24)
 applySpeed = function()
     local char = getSafeCharacter(); if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
 
     captureOriginalStats()
 
-    hum.WalkSpeed = Config.Speed.Value
+    -- 🔒 Limita ao range seguro
+    local safeSpeed = math.clamp(Config.Speed.Value, 16, Config.Speed.MaxSafe)
+    hum.WalkSpeed = safeSpeed
     hum.UseJumpPower = true
     hum.JumpPower = Config.Speed.JumpPower
+
+    if Config.Debug then
+        print("[BOLSONARO] WalkSpeed aplicado:", safeSpeed)
+    end
 end
 
--- 🔑 Força o WalkSpeed direto (nunca desliga)
+-- 🔑 Enforça WalkSpeed (respeitando limite + stun)
 enforceWalkSpeed = function()
     local char = getSafeCharacter(); if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
 
-    -- Não força se estiver caído/ragdoll (respeita stun do jogo)
+    -- 🔒 Limita ao range seguro
+    local target = math.clamp(Config.Speed.Value, 16, Config.Speed.MaxSafe)
+
+    -- Não força se estiver caído/ragdoll
     local state = hum:GetState()
     if state == Enum.HumanoidStateType.FallingDown
        or state == Enum.HumanoidStateType.Ragdoll
@@ -218,12 +277,8 @@ enforceWalkSpeed = function()
         return
     end
 
-    if math.abs(hum.WalkSpeed - Config.Speed.Value) > 0.1 then
-        hum.WalkSpeed = Config.Speed.Value
-    end
-
-    if hum.UseJumpPower and math.abs(hum.JumpPower - Config.Speed.JumpPower) > 0.1 then
-        hum.JumpPower = Config.Speed.JumpPower
+    if math.abs(hum.WalkSpeed - target) > 0.1 then
+        hum.WalkSpeed = target
     end
 end
 
@@ -312,7 +367,7 @@ local function updateFollowBall()
         hrp.CFrame = CFrame.lookAt(hrp.Position, targetPos)
     end)
 
-    local speed = math.min(math.max(hum.WalkSpeed, 16), 35)
+    local speed = math.min(math.max(hum.WalkSpeed, 16), 24)
     followBodyVel.Velocity = direction * speed
 end
 
@@ -371,12 +426,6 @@ local function updateReachCircle()
     circlePart.CFrame = CFrame.new(hrp.Position)
 end
 
-local function initBypass()
-    if not Config.Bypass.Enabled or bypassActive then return end
-    bypassActive = true
-    -- Bypass removido por padrão (não precisamos esconder WalkSpeed agora)
-end
-
 local function createUI()
     local parentGui
     local ok = pcall(function() parentGui = game:GetService("CoreGui") end)
@@ -388,34 +437,32 @@ local function createUI()
     ScreenGui.Parent = parentGui
     table.insert(UI_Elements, ScreenGui)
 
-    -- Banner de créditos
-    local creditsFrame = Instance.new("Frame")
-    creditsFrame.Size = UDim2.new(0, 220, 0, 55)
-    creditsFrame.Position = UDim2.new(0.5, -110, 0, 20)
-    creditsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    creditsFrame.BackgroundTransparency = 0.15
-    creditsFrame.BorderSizePixel = 0
-    creditsFrame.Parent = ScreenGui
-    local crCorner = Instance.new("UICorner"); crCorner.CornerRadius = UDim.new(0, 10); crCorner.Parent = creditsFrame
-    local crStroke = Instance.new("UIStroke"); crStroke.Color = Color3.fromRGB(75,145,230); crStroke.Thickness = 1.5; crStroke.Parent = creditsFrame
-
-    local crLabel = Instance.new("TextLabel")
-    crLabel.Size = UDim2.new(1, 0, 1, 0)
-    crLabel.BackgroundTransparency = 1
-    crLabel.Text = "BOLSONARO HUB\nBy: " .. Config.Credits
-    crLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    crLabel.TextSize = 14
-    crLabel.Font = Enum.Font.GothamBold
-    crLabel.Parent = creditsFrame
-
+    -- Banner
+    local banner = Instance.new("Frame")
+    banner.Size = UDim2.new(0, 220, 0, 55)
+    banner.Position = UDim2.new(0.5, -110, 0, 20)
+    banner.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    banner.BackgroundTransparency = 0.15
+    banner.BorderSizePixel = 0
+    banner.Parent = ScreenGui
+    local bcorner = Instance.new("UICorner"); bcorner.CornerRadius = UDim.new(0, 10); bcorner.Parent = banner
+    local bstroke = Instance.new("UIStroke"); bstroke.Color = Color3.fromRGB(75,145,230); bstroke.Thickness = 1.5; bstroke.Parent = banner
+    local blabel = Instance.new("TextLabel")
+    blabel.Size = UDim2.new(1, 0, 1, 0)
+    blabel.BackgroundTransparency = 1
+    blabel.Text = "BOLSONARO HUB\nBy: " .. Config.Credits
+    blabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    blabel.TextSize = 14
+    blabel.Font = Enum.Font.GothamBold
+    blabel.Parent = banner
     task.spawn(function()
         task.wait(5)
         for i = 1, 20 do
-            creditsFrame.BackgroundTransparency = 0.15 + (i * 0.0425)
-            crLabel.TextTransparency = i * 0.05
+            banner.BackgroundTransparency = 0.15 + (i * 0.0425)
+            blabel.TextTransparency = i * 0.05
             task.wait(0.05)
         end
-        creditsFrame:Destroy()
+        banner:Destroy()
     end)
 
     restoreBtn = Instance.new("TextButton")
@@ -426,23 +473,6 @@ local function createUI()
     restoreBtn.Parent = ScreenGui
     local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1,0); rbc.Parent = restoreBtn
     local rbs = Instance.new("UIStroke"); rbs.Color = Color3.fromRGB(75,145,230); rbs.Thickness = 2; rbs.Parent = restoreBtn
-    do
-        local drag, ds, sp
-        restoreBtn.InputBegan:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-                drag, ds, sp = true, i.Position, restoreBtn.Position
-            end
-        end)
-        restoreBtn.InputChanged:Connect(function(i)
-            if drag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-                local d = i.Position - ds
-                restoreBtn.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
-            end
-        end)
-        restoreBtn.InputEnded:Connect(function(i)
-            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then drag = false end
-        end)
-    end
 
     local Main = Instance.new("Frame")
     Main.Size = UDim2.new(0, 620, 0, 420); Main.Position = savedPos
@@ -484,7 +514,7 @@ local function createUI()
     local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,6); bc.Parent = badge
     local vl = Instance.new("TextLabel")
     vl.Size = UDim2.new(1,0,1,0); vl.BackgroundTransparency = 1
-    vl.Text = "v8.7"; vl.TextSize = 11
+    vl.Text = "v8.8"; vl.TextSize = 11
     vl.Font = Enum.Font.GothamBold; vl.TextColor3 = Color3.fromRGB(220,220,220); vl.Parent = badge
 
     local function makeWinBtn(text, xPos, onClick)
@@ -546,8 +576,7 @@ local function createUI()
     addNav("Ball", "⚽", "Ball", 2)
     addNav("Reach", "🎯", "Reach", 3)
     addNav("Visual", "👁", "Visual", 4)
-    addNav("Protect", "🛡", "Protect", 5)
-    addNav("Others", "📋", "Others", 6)
+    addNav("Others", "📋", "Others", 5)
     for n, btn in pairs(navButtons) do
         btn.MouseButton1Click:Connect(function() setPage(n) end)
     end
@@ -685,28 +714,22 @@ local function createUI()
 
     -- PLAYER
     local pP = newPage("Player")
-    makeLabel(pP, 1, "- VELOCIDADE (direto, sem toggle)")
-    makeSlider(pP, 2, "WalkSpeed", "8 = lento / 16 = normal / 50 = rápido", Config.Speed, "Value", 8, 100, 1, applySpeed)
-    makeSlider(pP, 3, "Jump Power", "50-200", Config.Speed, "JumpPower", 50, 200, 5, applyJump)
-    makeLabel(pP, 4, "- RESET RÁPIDO")
-    makeButton(pP, 5, "🔄 Voltar pra 16", function()
+    makeLabel(pP, 1, "- VELOCIDADE (16-24 = SEGURO)")
+    makeSlider(pP, 2, "WalkSpeed", "16 = normal / 24 = rápido (seguro)", Config.Speed, "Value", 16, Config.Speed.MaxSafe, 1, applySpeed)
+    makeSlider(pP, 3, "Jump Power", "50-100", Config.Speed, "JumpPower", 50, 100, 5, applyJump)
+    makeLabel(pP, 4, "- PRESETS")
+    makeButton(pP, 5, "🚶 Normal (16)", function()
         Config.Speed.Value = 16
-        Config.Speed.JumpPower = 50
         for _, r in ipairs(refreshUIRefs) do pcall(r) end
         applySpeed()
-    end, Color3.fromRGB(200, 100, 50))
-    makeButton(pP, 6, "🏃 Modo Turbo (50)", function()
-        Config.Speed.Value = 50
+    end, Color3.fromRGB(80, 100, 140))
+    makeButton(pP, 6, "🏃 Rápido (24)", function()
+        Config.Speed.Value = 24
         for _, r in ipairs(refreshUIRefs) do pcall(r) end
         applySpeed()
     end, Color3.fromRGB(80, 150, 60))
-    makeButton(pP, 7, "🐌 Modo Lento (10)", function()
-        Config.Speed.Value = 10
-        for _, r in ipairs(refreshUIRefs) do pcall(r) end
-        applySpeed()
-    end, Color3.fromRGB(100, 100, 130))
-
-    makeLabel(pP, 8, "- CÂMERA")
+    makeLabel(pP, 7, "⚠️ Acima de 24 = ban")
+    makeLabel(pP, 8, "- CAMERA")
     makeSlider(pP, 9, "FOV Changer", "40-120", Config.FOV, "Value", 40, 120, 1, applyFOV)
 
     -- BALL
@@ -737,20 +760,15 @@ local function createUI()
     makeToggle(pV, 2, "Luminosidade", "Brilho customizado", Config.Brightness, "Enabled", applyBrightness)
     makeSlider(pV, 3, "Brilho", "0-4", Config.Brightness, "Value", 0, 4, 0.1, applyBrightness)
 
-    -- PROTECT
-    local pPr = newPage("Protect")
-    makeLabel(pPr, 1, "- BYPASS")
-    makeToggle(pPr, 2, "Bypass (Spoof)", "Opcional (recomendado OFF)", Config.Bypass, "Enabled")
-
     -- OTHERS
     local pO = newPage("Others")
     makeLabel(pO, 1, "- SISTEMA")
     makeToggle(pO, 2, "Debug (Console)", "Logs no console (F9)", Config, "Debug")
     makeLabel(pO, 3, "- CRÉDITOS")
     makeLabel(pO, 4, "Script feito por: " .. Config.Credits)
-    makeLabel(pO, 5, "Versão: 8.7")
-    makeLabel(pO, 6, "WalkSpeed direto pela barra")
-    makeLabel(pO, 7, "Nunca precisa desligar")
+    makeLabel(pO, 5, "Versão: 8.8")
+    makeLabel(pO, 6, "WalkSpeed seguro: 16-24")
+    makeLabel(pO, 7, "Proteção anti-ban ativada")
 
     setPage("Player")
 
@@ -819,8 +837,7 @@ end
 _G.BOLSONARO_destroyAll = destroyAll
 
 pcall(createUI)
-pcall(initBypass)
-
+pcall(blockSuspiciousRemotes)
 pcall(captureOriginalStats)
 
 table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
@@ -845,9 +862,10 @@ table.insert(Connections, RunService.Heartbeat:Connect(function()
 end))
 
 print("═══════════════════════════════════════════")
-print("  BOLSONARO HUB v8.7 CARREGADO")
+print("  BOLSONARO HUB v8.8 CARREGADO")
 print("  By: " .. Config.Credits)
 print("  RSHIFT=menu | G=reach | R=follow | T=esp")
 print("  Modo:", isMobile and "MOBILE" or "PC")
-print("  WalkSpeed direto (sem toggle)")
+print("  WalkSpeed SEGURO: 16-24")
+print("  Anti-ban: ATIVO")
 print("═══════════════════════════════════════════")
