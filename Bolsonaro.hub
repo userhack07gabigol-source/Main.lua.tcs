@@ -1,11 +1,11 @@
--- [[ ⚽ BOLSONARO HUB V8.8 - WALKSPEED SEGURO ]] --
+-- [[ ⚽ BOLSONARO HUB V8.9 - BYPASS CORRIGIDO ]] --
 -- Feito por: zacklobao
--- WalkSpeed limitado de 16 a 24 (range seguro)
+-- WalkSpeed seguro (16-24) + Bypass opcional
 
 print("═══════════════════════════════════════════")
-print("  🇧🇷  BOLSONARO HUB  •  v8.8")
+print("  🇧🇷  BOLSONARO HUB  •  v8.9")
 print("  By: zacklobao")
-print("  WalkSpeed Seguro (16-24)")
+print("  WalkSpeed Seguro + Bypass Opcional")
 print("═══════════════════════════════════════════")
 
 local Players          = game:GetService("Players")
@@ -23,11 +23,13 @@ local refreshUIRefs = {}
 local Config = {
     Debug = false,
     Credits = "zacklobao",
-    Bypass = { Enabled = true },
+
+    -- 🔑 BYPASS OFF por padrão (evita quebrar remotes do jogo)
+    Bypass = { Enabled = false },
+
     Humanization = { Enabled = false, SpeedVariation = 0.05 },
     ESP = { Enabled = false, Color = Color3.fromRGB(255,220,0), Pulse = true, ShowBox = true, ShowTag = true },
 
-    -- 🔑 WALKSPEED: limitado de 16 a 24 (range seguro)
     Speed = {
         Value = 16,
         JumpPower = 50,
@@ -82,13 +84,17 @@ local lastBallScan = 0
 local cachedClosest = nil
 
 -- ═══════════════════════════════════════════════
---  ANTI-CHEAT BYPASS (bloqueia remotes suspeitos)
+--  BYPASS SEGURO (opcional)
+--  Só roda se Config.Bypass.Enabled = true
+--  Lista MUITO restrita (não quebra o jogo)
 -- ═══════════════════════════════════════════════
 local function blockSuspiciousRemotes()
+    if not Config.Bypass.Enabled then return end
+
+    -- 🔑 Lista restrita: só nomes que são 100% anti-cheat
     local suspeitos = {
-        "report", "validate", "check", "anticheat", "ac_",
-        "flag", "detect", "walkcheck", "speedcheck",
-        "integrity", "security", "monitor",
+        "anticheat", "ac_report", "ac_log", "ac_flag",
+        "walkcheck", "speedcheck",
     }
 
     local function isSuspeito(remote)
@@ -101,7 +107,7 @@ local function blockSuspiciousRemotes()
         return false
     end
 
-    -- Hook no __namecall pra bloquear FireServer de remotes suspeitos
+    -- Hook no __namecall (só bloqueia FireServer de remotes muito específicos)
     pcall(function()
         local mt = getrawmetatable(game)
         local oldNamecall = mt.__namecall
@@ -111,19 +117,15 @@ local function blockSuspiciousRemotes()
             if method == "FireServer" and typeof(self) == "Instance"
                and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction"))
                and isSuspeito(self) then
+                if Config.Debug then
+                    print("[BOLSONARO] Remote bloqueado:", self.Name)
+                end
                 return
             end
             return oldNamecall(self, ...)
         end)
         setreadonly(mt, true)
     end)
-
-    -- Também remove remotes existentes suspeitos
-    for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-        if (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) and isSuspeito(obj) then
-            pcall(function() obj:Destroy() end)
-        end
-    end
 end
 
 -- ═══════════════════════════════════════════════
@@ -182,7 +184,6 @@ local function getClosestBall()
     return best
 end
 
--- 🔑 Captura WalkSpeed base
 captureOriginalStats = function()
     local char = LocalPlayer.Character
     if not char then return end
@@ -243,14 +244,12 @@ local function updateESP()
     end
 end
 
--- 🔑 Aplica WalkSpeed (respeitando limite 16-24)
 applySpeed = function()
     local char = getSafeCharacter(); if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
 
     captureOriginalStats()
 
-    -- 🔒 Limita ao range seguro
     local safeSpeed = math.clamp(Config.Speed.Value, 16, Config.Speed.MaxSafe)
     hum.WalkSpeed = safeSpeed
     hum.UseJumpPower = true
@@ -261,15 +260,12 @@ applySpeed = function()
     end
 end
 
--- 🔑 Enforça WalkSpeed (respeitando limite + stun)
 enforceWalkSpeed = function()
     local char = getSafeCharacter(); if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
 
-    -- 🔒 Limita ao range seguro
     local target = math.clamp(Config.Speed.Value, 16, Config.Speed.MaxSafe)
 
-    -- Não força se estiver caído/ragdoll
     local state = hum:GetState()
     if state == Enum.HumanoidStateType.FallingDown
        or state == Enum.HumanoidStateType.Ragdoll
@@ -514,7 +510,7 @@ local function createUI()
     local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,6); bc.Parent = badge
     local vl = Instance.new("TextLabel")
     vl.Size = UDim2.new(1,0,1,0); vl.BackgroundTransparency = 1
-    vl.Text = "v8.8"; vl.TextSize = 11
+    vl.Text = "v8.9"; vl.TextSize = 11
     vl.Font = Enum.Font.GothamBold; vl.TextColor3 = Color3.fromRGB(220,220,220); vl.Parent = badge
 
     local function makeWinBtn(text, xPos, onClick)
@@ -764,11 +760,15 @@ local function createUI()
     local pO = newPage("Others")
     makeLabel(pO, 1, "- SISTEMA")
     makeToggle(pO, 2, "Debug (Console)", "Logs no console (F9)", Config, "Debug")
-    makeLabel(pO, 3, "- CRÉDITOS")
-    makeLabel(pO, 4, "Script feito por: " .. Config.Credits)
-    makeLabel(pO, 5, "Versão: 8.8")
-    makeLabel(pO, 6, "WalkSpeed seguro: 16-24")
-    makeLabel(pO, 7, "Proteção anti-ban ativada")
+    makeLabel(pO, 3, "- BYPASS (avançado)")
+    makeToggle(pO, 4, "Bloquear Remotes Anti-Cheat", "Opcional - pode quebrar features", Config.Bypass, "Enabled", function(state)
+        if state then pcall(blockSuspiciousRemotes) end
+    end)
+    makeLabel(pO, 5, "⚠️ Mantenha OFF a menos que precise")
+    makeLabel(pO, 6, "- CRÉDITOS")
+    makeLabel(pO, 7, "Script feito por: " .. Config.Credits)
+    makeLabel(pO, 8, "Versão: 8.9")
+    makeLabel(pO, 9, "WalkSpeed seguro: 16-24")
 
     setPage("Player")
 
@@ -837,8 +837,10 @@ end
 _G.BOLSONARO_destroyAll = destroyAll
 
 pcall(createUI)
-pcall(blockSuspiciousRemotes)
 pcall(captureOriginalStats)
+
+-- 🔑 Bypass NÃO roda no boot (só se usuário ativar manualmente na UI)
+-- pcall(blockSuspiciousRemotes)
 
 table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
@@ -862,10 +864,10 @@ table.insert(Connections, RunService.Heartbeat:Connect(function()
 end))
 
 print("═══════════════════════════════════════════")
-print("  BOLSONARO HUB v8.8 CARREGADO")
+print("  BOLSONARO HUB v8.9 CARREGADO")
 print("  By: " .. Config.Credits)
 print("  RSHIFT=menu | G=reach | R=follow | T=esp")
 print("  Modo:", isMobile and "MOBILE" or "PC")
 print("  WalkSpeed SEGURO: 16-24")
-print("  Anti-ban: ATIVO")
+print("  Bypass: OFF (ative na aba Others se precisar)")
 print("═══════════════════════════════════════════")
